@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ArcGIS Dependency Explorer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/cytoscape@3.27.0/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1 title="Explore dependencies for ArcGIS items (StoryMaps, Web Maps, Experiences, Dashboards, etc.)">
+        ArcGIS Dependency Explorer
+      </h1>
+
+      <div class="header-actions">
+        <button id="exportJson" class="ghost" title="Download the discovered dependency graph as JSON.">
+          Export JSON
+        </button>
+        <button id="exportCsv" class="ghost" title="Download a flat list with relationships as CSV.">
+          Export CSV
+        </button>
+        <div class="inline">
+          <label class="mini muted" for="theme">Theme</label>
+          <select id="theme" class="select" title="Switch theme (Auto follows your system setting).">
+            <option value="auto">Auto</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="alert" class="alert"></div>
+
+    <!-- Intro -->
+    <section class="card intro" aria-label="About this tool">
+      <h2>What this tool does</h2>
+      <p>
+        Paste an ArcGIS item URL or 32-character item ID and click <b>Analyze</b>. The app discovers linked
+        items (Web Maps, layers, URLs, etc.) and renders an interactive dependency graph. Sign in if you need to
+        view private content. Use <b>Focus mode</b> to isolate a subgraph, <b>Reflow selection</b> to reduce line
+        crossings, and export <b>JSON/CSV</b> for reporting. This is a read-only viewer—no edits are made to your items.
+      </p>
+    </section>
+
+    <!-- Controls -->
+    <div class="card controls" aria-label="Controls">
+      <div class="row-compact">
+        <input id="url" placeholder="Paste an item URL or 32-char Item ID…" title="Examples: StoryMaps, Web Maps, Dashboards, Experiences. Portal is auto-hinted." />
+        <div class="inline">
+          <button id="go" title="Analyze the provided item and build the dependency graph.">Analyze</button>
+          <button id="resetApp" class="ghost" title="Clear the input and reset the page.">Clear input</button>
+        </div>
+      </div>
+
+      <!-- Auth -->
+      <details class="auth">
+        <summary title="Open to sign in or provide an existing token. Needed for private items.">
+          <span>Authentication (for private items)</span>
+          <span id="authStatus" class="pill" style="margin-left:8px">Not signed in</span>
+        </summary>
+
+        <div class="auth-sections">
+          <section class="auth-section">
+            <div class="section-title">Portal</div>
+            <div class="grid2">
+              <label class="label">Portal URL</label>
+              <input id="portalAuth" placeholder="https://www.arcgis.com" value="https://www.arcgis.com" title="Base portal for REST requests. We’ll auto-hint from your item URL when possible." />
+              <div class="label mini muted">Active host</div>
+              <div id="portalHostHint" class="mini muted">www.arcgis.com</div>
+            </div>
+          </section>
+
+          <section class="auth-section">
+            <div class="section-title">Sign in</div>
+            <div class="grid2">
+              <label class="label">Username</label>
+              <input id="user" placeholder="username" autocomplete="username" title="ArcGIS Online or Enterprise username." />
+              <label class="label">Password</label>
+              <input id="pass" placeholder="password" type="password" autocomplete="current-password" title="Stored only in this browser session." />
+              <div class="label mini muted">Client option</div>
+              <label class="switch mini muted" title="Use requestip when running on localhost or when referer is blocked.">
+                <input type="checkbox" id="useReqIp" />
+                <span>Use <b>requestip</b> (helps on localhost)</span>
+              </label>
+              <div class="label"></div>
+              <div class="inline end">
+                <button id="genToken" title="Generate a short-lived token for private items.">Generate token</button>
+                <button id="clearToken" class="ghost" title="Remove the current token from the session.">Clear token</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="auth-section">
+            <div class="section-title">Token</div>
+            <div class="grid2">
+              <label class="label">Current token</label>
+              <input id="token" placeholder="paste token (optional)" title="Paste an existing token if you already have one." />
+              <div class="label mini muted">Notes</div>
+              <div id="authBlurb" class="mini muted">
+                Token is stored only in this page session. If an analysis fails with 498/499, sign in here and try again.
+              </div>
+            </div>
+          </section>
+        </div>
+      </details>
+    </div>
+
+    <!-- Two-column work area -->
+    <div class="layout">
+      <section class="graph-col">
+        <div class="card sect" aria-label="Graph area">
+          <div class="graph-toolbar" aria-label="Graph tools">
+            <div class="inline wrap">
+              <button id="fit" class="ghost" title="Fit the entire graph into view.">Fit</button>
+              <button id="toggleUrls" class="ghost" title="Toggle visibility of raw service URLs without item IDs.">Collapse URLs</button>
+              <button id="expandWebMaps" class="ghost" title="Zoom to discovered Web Maps.">Expand all Web Maps</button>
+              <button id="clearSel" class="ghost" title="Unselect any selected nodes.">Clear selection</button>
+              <button id="exportPng" class="ghost" title="Export a PNG snapshot of the graph.">Export graph to PNG</button>
+
+              <span class="spacer" aria-hidden="true"></span>
+              <button id="focusMode" class="ghost" title="When On: click a node to fade everything else and re-layout just that subgraph.">Focus mode: Off</button>
+              <button id="reflowSel" class="ghost" title="Re-layout the currently selected (or focused) node’s neighborhood to reduce crossings.">Reflow selection</button>
+              <button id="clearFocus" class="ghost" title="Exit focus mode and show the full graph.">Clear focus</button>
+            </div>
+            <div id="legend" class="legend" title="Click a chip to filter to that type. Click again to clear."></div>
+          </div>
+
+          <div id="cy" title="Pan with drag, zoom with wheel/trackpad, box-select with Shift+drag."></div>
+          <div class="mini muted" id="counts" style="margin-top:10px">Nodes: 0 • Edges: 0</div>
+        </div>
+      </section>
+
+      <aside class="side-col" aria-label="Details">
+        <div class="card sect">
+          <h3>Summary</h3>
+          <div id="summary" class="kv"></div>
+        </div>
+
+        <div class="card sect grow-limited">
+          <div class="side-header">
+            <h3>Discovered items</h3>
+            <input id="search" class="side-search" placeholder='Search items & graph (supports key:value)…'
+                   title='Examples: type:"Web Map", owner:jsmith, "roads", id:abc123…  Search filters both the list and the graph.' />
+          </div>
+          <div id="items" class="list" role="region" aria-label="Discovered items list"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Full-width raw JSON under the grid -->
+    <section class="card sect raw-wide" aria-label="Raw JSON">
+      <h3>Raw (JSON)</h3>
+      <pre id="raw" class="pre">—</pre>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
